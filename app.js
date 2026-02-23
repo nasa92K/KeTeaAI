@@ -1,32 +1,31 @@
 /**
- * KeTeaAI — Connexion directe à l'API Google Gemini (GitHub Pages, sans backend).
- * URL exacte : .../v1beta/models/gemini-1.5-flash:generateContent?key=VOTRE_CLE_API
+ * KeTeaAI — Connexion directe à l'API Google Gemini (GitHub Pages).
+ * Modèle principal : gemini-2.0-flash. Fallback : gemini-1.5-flash.
  */
 
 (function () {
   'use strict';
 
-  // ========== CLÉ API (remplacer par la vôtre si besoin) ==========
-  const API_KEY = 'AIzaSyDbwzTyFQqVhTctFJMus53FK1WJVFFJmiE';
+  // Clé lue depuis config.js (fichier non versionné). Voir config.example.js.
+  const API_KEY = (typeof window !== 'undefined' && window.KEETEAI_API_KEY) ? window.KEETEAI_API_KEY : '';
 
-  const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=' + API_KEY;
+  // Modèle principal puis fallback (gemini-1.5-flash-8b n’existe pas en v1beta)
+  const MODEL_PRIMARY = 'gemini-2.0-flash';
+  const MODEL_FALLBACK = 'gemini-1.5-flash';
 
-  // Personnalité KeTeaAI : intégrée au début du prompt envoyé à Gemini
-  const KEETEAI_INSTRUCTION = 'Tu es KeTeaAI, un assistant étudiant bienveillant, pédagogique et concis. Réponds en restant utile et clair.\n\n';
+  const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models/';
+
+  // Instruction système invisible au début de chaque message (personnalité étudiant)
+  const KEETEAI_INSTRUCTION = 'Tu es KeTeaAI, un assistant étudiant expert. Réponds de façon claire, encourageante et structure tes réponses avec des puces si nécessaire.\n\n';
 
   /**
-   * Appel direct à l'API Gemini. Body strict : contents > parts > text.
+   * Appel Gemini avec un modèle donné. Body strict : { contents: [{ parts: [{ text }] }] }.
    */
-  async function callGemini(userPrompt) {
-    const promptWithPersonality = KEETEAI_INSTRUCTION + userPrompt;
+  async function fetchWithModel(modelId, promptText) {
+    const url = BASE_URL + modelId + ':generateContent?key=' + API_KEY;
+    const body = { contents: [{ parts: [{ text: promptText }] }] };
 
-    const body = {
-      contents: [
-        { parts: [{ text: promptWithPersonality }] }
-      ]
-    };
-
-    const response = await fetch(GEMINI_URL, {
+    const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
@@ -35,16 +34,13 @@
     const responseText = await response.text();
 
     if (!response.ok) {
-      if (typeof console !== 'undefined') {
-        console.error('[KeTeaAI] API erreur', response.status, responseText);
-      }
       let errMsg = responseText;
       try {
         const errJson = JSON.parse(responseText);
         if (errJson.error && errJson.error.message) errMsg = errJson.error.message;
       } catch (_) {}
-      if (response.status === 404) {
-        errMsg = 'Modèle non trouvé (404). Vérifiez l\'URL et le nom du modèle (gemini-1.5-flash).';
+      if (typeof console !== 'undefined') {
+        console.error('[KeTeaAI]', modelId, response.status, errMsg);
       }
       throw new Error(errMsg);
     }
@@ -62,6 +58,43 @@
       throw new Error('Réponse Gemini invalide');
     }
     return candidate.content.parts[0].text;
+  }
+
+  /**
+   * Message utilisateur en cas de quota / clé révoquée.
+   */
+  function friendlyErrorMessage(err) {
+    const msg = (err && err.message) ? err.message : String(err);
+    if (/quota|limit: 0|billing|rate.limit|retry in/i.test(msg)) {
+      return 'Quota ou limite atteinte. Réessayez dans quelques minutes ou consultez https://ai.google.dev/gemini-api/docs/rate-limits';
+    }
+    if (/leaked|invalid.*key|API key/i.test(msg)) {
+      return 'Clé API invalide ou révoquée. Créez une nouvelle clé sur https://aistudio.google.com/apikey et mettez-la dans app.js (const API_KEY). Ne commitez pas la clé sur Git.';
+    }
+    return msg;
+  }
+
+  /**
+   * Appel Gemini : essaie gemini-2.0-flash, puis gemini-1.5-flash en fallback.
+   */
+  async function callGemini(userPrompt) {
+    if (!API_KEY || !API_KEY.trim()) {
+      throw new Error('Clé API manquante. Dans app.js, définissez const API_KEY avec votre clé (https://aistudio.google.com/apikey).');
+    }
+    const promptWithPersonality = KEETEAI_INSTRUCTION + userPrompt;
+
+    try {
+      return await fetchWithModel(MODEL_PRIMARY, promptWithPersonality);
+    } catch (err) {
+      if (typeof console !== 'undefined') {
+        console.warn('[KeTeaAI] Fallback vers', MODEL_FALLBACK);
+      }
+      try {
+        return await fetchWithModel(MODEL_FALLBACK, promptWithPersonality);
+      } catch (err2) {
+        throw new Error(friendlyErrorMessage(err));
+      }
+    }
   }
 
   // Éléments DOM
@@ -171,7 +204,9 @@
       appendMessage(reply, 'ai');
     } catch (err) {
       setTypingIndicator(false);
-      appendMessage('Erreur : ' + err.message, 'ai');
+      var msg = err && err.message ? err.message : String(err);
+      if (/quota|leaked|API key|billing/i.test(msg)) msg = friendlyErrorMessage(err);
+      appendMessage('Erreur : ' + msg, 'ai');
     } finally {
       isWaitingForResponse = false;
       if (btnSend) btnSend.disabled = false;

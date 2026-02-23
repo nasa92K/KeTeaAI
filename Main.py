@@ -2,7 +2,7 @@ import google.generativeai as genai
 from datetime import datetime
 
 # Ajoutez le guillemet fermant à la fin
-genai.configure(api_key='AIzaSyAn0t3JBAB_StwvcpEi09mJmwhjzU9Rt7w')
+genai.configure(api_key='AIzaSyDbwzTyFQqVhTctFJMus53FK1WJVFFJmiE')  # Gemini API Key
 
 model = genai.GenerativeModel('gemini-2.5-flash')
 chat = model.start_chat(history=[])

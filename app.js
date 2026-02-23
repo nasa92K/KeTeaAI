@@ -1,15 +1,68 @@
 /**
- * KeTeaAI — Logique frontend (séparée du HTML)
- * Branchez votre API backend dans sendMessageToAPI() via fetch().
+ * KeTeaAI — Connexion directe à l'API Google Gemini (GitHub Pages, sans backend).
+ * URL exacte : .../v1beta/models/gemini-1.5-flash:generateContent?key=VOTRE_CLE_API
  */
 
 (function () {
   'use strict';
 
-  // ========== CONFIGURATION API ==========
-  // Remplacez par l’URL de votre backend (ex: Flask, FastAPI, Express)
-  const API_BASE_URL = '/api';  // ex: 'http://localhost:5000/api' ou 'https://votre-domaine.com/api'
-  const API_CHAT_ENDPOINT = `${API_BASE_URL}/chat`;  // Endpoint pour envoyer un message et recevoir la réponse IA
+  // ========== CLÉ API (remplacer par la vôtre si besoin) ==========
+  const API_KEY = 'AIzaSyDbwzTyFQqVhTctFJMus53FK1WJVFFJmiE';
+
+  const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=' + API_KEY;
+
+  // Personnalité KeTeaAI : intégrée au début du prompt envoyé à Gemini
+  const KEETEAI_INSTRUCTION = 'Tu es KeTeaAI, un assistant étudiant bienveillant, pédagogique et concis. Réponds en restant utile et clair.\n\n';
+
+  /**
+   * Appel direct à l'API Gemini. Body strict : contents > parts > text.
+   */
+  async function callGemini(userPrompt) {
+    const promptWithPersonality = KEETEAI_INSTRUCTION + userPrompt;
+
+    const body = {
+      contents: [
+        { parts: [{ text: promptWithPersonality }] }
+      ]
+    };
+
+    const response = await fetch(GEMINI_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+
+    const responseText = await response.text();
+
+    if (!response.ok) {
+      if (typeof console !== 'undefined') {
+        console.error('[KeTeaAI] API erreur', response.status, responseText);
+      }
+      let errMsg = responseText;
+      try {
+        const errJson = JSON.parse(responseText);
+        if (errJson.error && errJson.error.message) errMsg = errJson.error.message;
+      } catch (_) {}
+      if (response.status === 404) {
+        errMsg = 'Modèle non trouvé (404). Vérifiez l\'URL et le nom du modèle (gemini-1.5-flash).';
+      }
+      throw new Error(errMsg);
+    }
+
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch (_) {
+      throw new Error('Réponse API invalide');
+    }
+
+    const candidate = data.candidates && data.candidates[0];
+    if (!candidate || !candidate.content || !candidate.content.parts || !candidate.content.parts[0]) {
+      if (typeof console !== 'undefined') console.error('[KeTeaAI] Structure:', data);
+      throw new Error('Réponse Gemini invalide');
+    }
+    return candidate.content.parts[0].text;
+  }
 
   // Éléments DOM
   const chatForm = document.getElementById('chatForm');
@@ -18,16 +71,13 @@
   const typingIndicator = document.getElementById('typingIndicator');
   const btnSend = document.getElementById('btnSend');
   const btnNewChat = document.getElementById('btnNewChat');
-  const chatHistory = document.getElementById('chatHistory');
   const sidebar = document.getElementById('sidebar');
   const sidebarOpen = document.getElementById('sidebarOpen');
   const sidebarClose = document.getElementById('sidebarClose');
   const sidebarOverlay = document.getElementById('sidebarOverlay');
 
-  // État simple (à remplacer par un store si besoin)
   let isWaitingForResponse = false;
 
-  // ========== SIDEBAR (mobile) ==========
   function openSidebar() {
     if (sidebar) sidebar.classList.add('show');
     if (sidebarOverlay) sidebarOverlay.classList.add('show');
@@ -42,10 +92,8 @@
   if (sidebarClose) sidebarClose.addEventListener('click', closeSidebar);
   if (sidebarOverlay) sidebarOverlay.addEventListener('click', closeSidebar);
 
-  // ========== NOUVELLE CONVERSATION ==========
   function clearChatUI() {
     if (!chatMessages) return;
-    // Garder uniquement le premier message (bienvenue IA)
     const welcome = chatMessages.querySelector('.message-ai[data-role="ai"]');
     chatMessages.innerHTML = '';
     if (welcome) chatMessages.appendChild(welcome);
@@ -55,30 +103,23 @@
     btnNewChat.addEventListener('click', function () {
       clearChatUI();
       closeSidebar();
-      // Ici : réinitialiser l’historique côté backend si votre API gère des sessions
-      // exemple : fetch(API_BASE_URL + '/new-session', { method: 'POST' });
     });
   }
 
-  // ========== AFFICHAGE DES MESSAGES ==========
-  /**
-   * Ajoute une bulle de message dans la zone de chat.
-   * @param {string} content - Texte du message
-   * @param {'user'|'ai'} role - 'user' ou 'ai'
-   */
+  // Bulles Bootstrap : card, p-3, rounded
   function appendMessage(content, role) {
     if (!chatMessages || !content.trim()) return;
 
     const div = document.createElement('div');
-    div.className = `message message-${role} mb-3`;
+    div.className = 'message message-' + role + ' mb-3 d-flex gap-2';
     div.setAttribute('data-role', role);
 
     const avatar = document.createElement('div');
-    avatar.className = 'message-avatar';
+    avatar.className = 'message-avatar align-self-start';
     avatar.innerHTML = role === 'user' ? '<i class="fas fa-user"></i>' : '<i class="fas fa-robot"></i>';
 
     const bubble = document.createElement('div');
-    bubble.className = 'message-bubble';
+    bubble.className = 'message-bubble card p-3 rounded-3';
     const contentEl = document.createElement('div');
     contentEl.className = 'message-content';
     contentEl.textContent = content;
@@ -90,10 +131,6 @@
     chatMessages.scrollTop = chatMessages.scrollHeight;
   }
 
-  /**
-   * Affiche ou masque l’indicateur « l’IA tape ».
-   * @param {boolean} show
-   */
   function setTypingIndicator(show) {
     if (!typingIndicator) return;
     if (show) {
@@ -106,40 +143,6 @@
     if (chatMessages) chatMessages.scrollTop = chatMessages.scrollHeight;
   }
 
-  // ========== APPEL API (À BRANCHER SUR VOTRE BACKEND) ==========
-  /**
-   * Envoie le message utilisateur à votre API et retourne la réponse IA.
-   * Adaptez l’URL, la méthode et le format (JSON) selon votre backend.
-   *
-   * Exemple attendu côté backend :
-   *   POST /api/chat
-   *   Body: { "message": "Texte du message utilisateur" }
-   *   Response: { "reply": "Réponse de l’IA" }
-   *
-   * @param {string} userMessage - Message envoyé par l’utilisateur
-   * @returns {Promise<string>} - Réponse texte de l’IA
-   */
-  async function sendMessageToAPI(userMessage) {
-    const response = await fetch(API_CHAT_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        // 'Authorization': 'Bearer VOTRE_TOKEN',  // si votre API exige une auth
-      },
-      body: JSON.stringify({ message: userMessage }),
-    });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(errText || `Erreur ${response.status}`);
-    }
-
-    const data = await response.json();
-    // Adaptez selon le nom du champ renvoyé par votre API (ex: "reply", "response", "text")
-    return data.reply ?? data.response ?? data.text ?? String(data);
-  }
-
-  // ========== ENVOI DU MESSAGE (FORMULAIRE) ==========
   function getTrimmedValue() {
     return messageInput ? messageInput.value.trim() : '';
   }
@@ -163,12 +166,12 @@
     setTypingIndicator(true);
 
     try {
-      const reply = await sendMessageToAPI(text);
+      const reply = await callGemini(text);
       setTypingIndicator(false);
       appendMessage(reply, 'ai');
     } catch (err) {
       setTypingIndicator(false);
-      appendMessage('Désolé, une erreur est survenue. Vérifiez que le backend est démarré et que l’URL dans app.js (API_CHAT_ENDPOINT) est correcte. Détail : ' + err.message, 'ai');
+      appendMessage('Erreur : ' + err.message, 'ai');
     } finally {
       isWaitingForResponse = false;
       if (btnSend) btnSend.disabled = false;
@@ -177,7 +180,6 @@
 
   if (chatForm) chatForm.addEventListener('submit', handleSubmit);
 
-  // ========== AUTO-RESIZE TEXTAREA ==========
   if (messageInput) {
     messageInput.addEventListener('input', function () {
       this.style.height = 'auto';
@@ -190,8 +192,4 @@
       }
     });
   }
-
-  // Optionnel : charger l’historique des conversations depuis le localStorage ou votre API
-  // function loadHistory() { ... }
-  // loadHistory();
 })();

@@ -1,0 +1,12 @@
+# Render — Déploiement du backend KeTeaAI (api.py)
+# Doc : https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: keteaai-api
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python api.py
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+    healthCheckPath: /api/health

@@ -1,8 +1,10 @@
 import google.generativeai as genai
 from datetime import datetime
 
+import apiGeminiKey from ./.env
+
 # Ajoutez le guillemet fermant à la fin
-genai.configure(api_key='AIzaSyDbwzTyFQqVhTctFJMus53FK1WJVFFJmiE')  # Gemini API Key
+genai.configure(api_key=apiGeminiKey)  # Gemini API Key
 
 model = genai.GenerativeModel('gemini-2.5-flash')
 chat = model.start_chat(history=[])
